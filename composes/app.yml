@@ -1,0 +1,25 @@
+services:
+  # Management container with a web-based terminal and SSH daemon
+  mgm:
+    image: harbor.rosti.cz/rosti-public/mgm:latest
+    environment:
+      TTYD_TOKEN: ${TTYD_TOKEN}
+      SET_SHELL: fish # Options: bash, fish, zsh
+    volumes:
+    - /srv/stack:/srv/stack
+    - /root/.docker/:/root/.docker/
+    - /run/docker.sock:/run/docker.sock
+    - /etc/shadow:/etc/shadow
+    - /root/.ssh:/root/.ssh
+    - /etc/ssh:/etc/ssh
+    ports:
+    - 1234:1234
+
+  app:
+    image: harbor.rosti.cz/rosti-public/runtime:2025.09-1
+    restart: always
+    volumes:
+    - ./data:/srv/app
+    ports:
+    - 22:22
+    - 80:8000

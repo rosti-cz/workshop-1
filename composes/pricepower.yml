@@ -1,0 +1,41 @@
+services:
+  # Management container with a web-based terminal and SSH daemon
+  mgm:
+    image: harbor.rosti.cz/rosti-public/mgm:latest
+    environment:
+      TTYD_TOKEN: ${TTYD_TOKEN}
+      SET_SHELL: fish # Options: bash, fish, zsh
+    volumes:
+    - /srv/stack:/srv/stack
+    - /root/.docker/:/root/.docker/
+    - /run/docker.sock:/run/docker.sock
+    - /etc/shadow:/etc/shadow
+    - /root/.ssh:/root/.ssh
+    - /etc/ssh:/etc/ssh
+    ports:
+    - 1234:1234
+    - 22:22
+  
+  # Reverse proxy container
+  traefik:
+    image: "traefik:v3.4"
+    restart: always
+    security_opt:
+    - no-new-privileges:true
+    command:
+    - "--providers.docker=true"
+    - "--providers.docker.exposedbydefault=false"
+    - "--entryPoints.web.address=:80"
+    ports:
+    - "80:80"
+    volumes:
+    - /run/docker.sock:/run/docker.sock:ro
+  
+  # Your containers go here
+  app:
+    image: ghcr.io/rosti-cz/workshop-custom-app:latest
+    restart: always
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.welcome.rule=PathPrefix(`/`)"
+      - "traefik.http.routers.welcome.entrypoints=web"

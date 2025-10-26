@@ -1,0 +1,24 @@
+name: Build a dev image
+
+on:
+  push:
+    branches: [ main ]
+  workflow_dispatch: {}
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    env:
+      IMAGE: ghcr.io/rosti-cz/workshop-custom-app
+      TAG: dev
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Log in to registry
+        run: echo "${{ secrets.GITHUB_TOKEN }}" | docker login ghcr.io -u ${{ github.actor }} --password-stdin
+      
+      - name: Build
+        run: docker build -t $IMAGE:$TAG .
+      
+      - name: Push
+        run: docker push $IMAGE:$TAG

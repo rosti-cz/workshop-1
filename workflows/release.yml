@@ -1,0 +1,50 @@
+name: Release of a new version
+
+on:
+  release:
+    types: [published]
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Version to release'
+        required: true
+        default: 'latest'
+        type: string
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    env:
+      IMAGE: ghcr.io/rosti-cz/workshop-custom-app
+      PULL_ENDPOINT: ${{ secrets.PULL_ENDPOINT }}
+    steps:
+      - uses: actions/checkout@v4
+
+      # Figure out the tag
+      - name: Get git tag
+        id: get_tag
+        if: github.event_name == 'release'
+        run: echo "TAG_NAME=${GITHUB_REF#refs/tags/}" >> $GITHUB_ENV
+      - name: Set version from input
+        if: github.event_name == 'workflow_dispatch'
+        run: echo "TAG_NAME=${{ github.event.inputs.version }}" >> $GITHUB_ENV
+
+      # Build
+      - name: Log in to registry
+        run: echo "${{ secrets.GITHUB_TOKEN }}" | docker login ghcr.io -u ${{ github.actor }} --password-stdin
+      
+      - name: Build
+        run: docker build -t $IMAGE:${{ env.TAG_NAME }} .
+
+      - name: Tag latest
+        run: docker tag $IMAGE:${{ env.TAG_NAME }} $IMAGE:latest
+      
+      - name: Push
+        run: docker push $IMAGE:${{ env.TAG_NAME }}
+      
+      - name: Push latest
+        run: docker push $IMAGE:latest
+      
+      # Deploy
+      - name: Call pull+up endpoint
+        run: curl $PULL_ENDPOINT

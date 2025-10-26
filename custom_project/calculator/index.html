@@ -1,0 +1,396 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <script src="https://cdn.tailwindcss.com"></script>
+
+  <script>
+    const priceColorMap = {
+      0: "bg-lime-100",
+      1: "bg-lime-200",
+      2: "bg-lime-300",
+      3: "bg-lime-400",
+      4: "bg-lime-500",
+      5: "bg-lime-600",
+      6: "bg-lime-700",
+      7: "bg-amber-100",
+      8: "bg-amber-200",
+      9: "bg-amber-300",
+      10: "bg-amber-400",
+      11: "bg-amber-500",
+      12: "bg-amber-600",
+      13: "bg-amber-700",
+      14: "bg-orange-200",
+      15: "bg-orange-300",
+      16: "bg-orange-400",
+      17: "bg-orange-500",
+      18: "bg-orange-600",
+      19: "bg-orange-700",
+      20: "bg-rose-300",
+      21: "bg-rose-400",
+      22: "bg-rose-500",
+      23: "bg-rose-600",
+      24: "bg-rose-700",
+    }
+
+    function getBgColor(value) {
+      // Clamp value between 0 and 24, round down
+      let v = Math.max(0, Math.min(24, Math.floor(value)));
+      return priceColorMap[v] || "";
+    }
+
+    function formatDate(date) {
+      const year = date.getFullYear();
+      const month = String(date.getMonth() + 1).padStart(2, '0');
+      const day = String(date.getDate()).padStart(2, '0');
+      return `${year}-${month}-${day}`;
+    }
+
+    function getHistoryDays() {
+      const urlParams = new URLSearchParams(window.location.search);
+      const history = parseInt(urlParams.get('history')) || 14;
+      // Limit history to maximum 365 days
+      return Math.min(Math.max(1, history), 365);
+    }
+
+    function getHourFromTimeString(timeStr) {
+      return parseInt(timeStr.split(':')[0]);
+    }
+
+    function getMinuteFromTimeString(timeStr) {
+      return parseInt(timeStr.split(':')[1]);
+    }
+
+    function isCurrentQuarter(hour, minute, isToday) {
+      if (!isToday) return false;
+      const now = new Date();
+      const currentHour = now.getHours();
+      const currentMinute = now.getMinutes();
+      
+      if (hour !== currentHour) return false;
+      
+      const currentQuarter = Math.floor(currentMinute / 15) * 15;
+      return minute === currentQuarter;
+    }
+
+    async function createTableRows() {
+      const tbody = document.getElementById('prices-table-body');
+      tbody.innerHTML = '';
+      const today = new Date();
+      const tomorrow = new Date(today);
+      tomorrow.setDate(today.getDate() + 1);
+      const tomorrowString = formatDate(tomorrow);
+      const historyDays = getHistoryDays();
+      
+      // Check if tomorrow's data is available
+      let tomorrowAvailable = false;
+      try {
+        const resp = await fetch('/price/day/' + tomorrowString + '?num_cheapest_hours=8');
+        const data = await resp.json();
+        if (!data.detail || data.detail !== "prices not found") {
+          tomorrowAvailable = true;
+        }
+      } catch (e) {}
+
+      // Calculate total rows: history days + today + tomorrow (if available)
+      let rowCount = historyDays + 1; // history days + today
+      if (tomorrowAvailable) {
+        rowCount += 1; // + tomorrow
+      }
+      
+      for (let offset = 0; offset < rowCount; offset++) {
+        let date;
+        let label;
+        if (tomorrowAvailable && offset === 0) {
+          // Tomorrow is first row if available
+          date = tomorrow;
+          label = `Zítra (${tomorrowString})`;
+        } else if (tomorrowAvailable && offset === 1) {
+          // Today is second row if tomorrow is available
+          date = today;
+          const todayString = formatDate(today);
+          label = `Dnes (${todayString})`;
+        } else if (!tomorrowAvailable && offset === 0) {
+          // Today is first row if tomorrow is not available
+          date = today;
+          const todayString = formatDate(today);
+          label = `Dnes (${todayString})`;
+        } else {
+          // Historical days
+          date = new Date(today);
+          const daysBack = tomorrowAvailable ? offset - 1 : offset;
+          date.setDate(today.getDate() - daysBack);
+          const dateString = formatDate(date);
+          label = dateString;
+        }
+        
+        const dateString = formatDate(date);
+        const rowId = `row-${dateString}`;
+        const tr = document.createElement('tr');
+        tr.id = rowId;
+        
+        // Date cell
+        const dateCell = document.createElement('td');
+        let dateCellClass = 'px-1 w-16 ';
+        // Weekend: Saturday (6) or Sunday (0)
+        if (date.getDay() === 0 || date.getDay() === 6) {
+          dateCellClass += 'bg-neutral-500';
+        } else {
+          dateCellClass += 'bg-neutral-200';
+        }
+        dateCell.className = dateCellClass;
+        dateCell.id = `date-${dateString}`;
+        dateCell.innerText = label;
+        tr.appendChild(dateCell);
+        
+        // Hour cells (24 hours)
+        for (let i = 0; i < 24; i++) {
+          const td = document.createElement('td');
+          td.className = 'px-1 text-xs leading-tight';
+          td.id = `${dateString}-${i}`;
+          td.innerHTML = '<div>-</div><div>-</div><div>-</div><div>-</div>';
+          tr.appendChild(td);
+        }
+        
+        tbody.appendChild(tr);
+      }
+    }
+
+    function loadData(date, isToday) {
+      fetch('/price/day/' + date + '?num_cheapest_hours=8')
+        .then(response => response.json())
+        .then(data => {
+          if (data.detail == "prices not found") {
+            for (let i = 0; i < 24; i++) {
+              document.getElementById(`${date}-${i}`).innerHTML = '<div>-</div><div>-</div><div>-</div><div>-</div>';
+            }
+            return;
+          }
+          
+          // Group prices by hour
+          const hourlyData = {};
+          for (let i = 0; i < 24; i++) {
+            hourlyData[i] = [];
+          }
+          
+          // Process all time entries and group by hour
+          Object.keys(data.total.hours).forEach(timeStr => {
+            const hour = getHourFromTimeString(timeStr);
+            const minute = getMinuteFromTimeString(timeStr);
+            const value = data.total.hours[timeStr];
+            
+            hourlyData[hour].push({
+              minute: minute,
+              value: value,
+              timeStr: timeStr
+            });
+          });
+          
+          // Sort each hour's data by minute
+          for (let hour = 0; hour < 24; hour++) {
+            hourlyData[hour].sort((a, b) => a.minute - b.minute);
+          }
+          
+          // Get cheapest and most expensive hours for 15-min intervals
+          const cheapestTimes = new Set();
+          const expensiveTimes = new Set();
+          
+          if (data.cheapest_hours_by_average && data.cheapest_hours_by_average.hours) {
+            data.cheapest_hours_by_average.hours.forEach(timeStr => {
+              if (typeof timeStr === 'string' && timeStr.includes(':')) {
+                cheapestTimes.add(timeStr);
+              } else {
+                // Legacy hourly format - add all quarters for this hour
+                for (let min = 0; min < 60; min += 15) {
+                  cheapestTimes.add(`${timeStr}:${min.toString().padStart(2, '0')}`);
+                }
+              }
+            });
+          }
+          
+          if (data.most_expensive_hours_by_average && data.most_expensive_hours_by_average.hours) {
+            data.most_expensive_hours_by_average.hours.forEach(timeStr => {
+              if (typeof timeStr === 'string' && timeStr.includes(':')) {
+                expensiveTimes.add(timeStr);
+              } else {
+                // Legacy hourly format - add all quarters for this hour
+                for (let min = 0; min < 60; min += 15) {
+                  expensiveTimes.add(`${timeStr}:${min.toString().padStart(2, '0')}`);
+                }
+              }
+            });
+          }
+          
+          // Update each hour cell
+          for (let hour = 0; hour < 24; hour++) {
+            const td = document.getElementById(`${date}-${hour}`);
+            const quarters = hourlyData[hour];
+            
+            let cellClasses = 'px-1 text-xs leading-tight';
+            
+            // Check if we have only one value for this hour
+            if (quarters.length === 1) {
+              // Display single value across entire cell
+              const quarter = quarters[0];
+              const value = Math.round(quarter.value * 100) / 100;
+              const bgColor = getBgColor(value);
+              
+              let extraClass = '';
+              let borderClass = '';
+              
+              // Check if this is the current time quarter
+              if (isCurrentQuarter(hour, quarter.minute, isToday)) {
+                extraClass = 'font-bold';
+                borderClass = 'border-2 border-solid border-gray-800';
+              }
+              
+              // Check if this quarter is in cheapest or most expensive
+              if (cheapestTimes.has(quarter.timeStr)) {
+                borderClass = 'border-2 border-dotted border-lime-400';
+              } else if (expensiveTimes.has(quarter.timeStr)) {
+                borderClass = 'border-2 border-dotted border-rose-400';
+              }
+              
+              td.innerHTML = `<div class="${bgColor} ${extraClass} ${borderClass} h-full flex items-center justify-center">${value}</div>`;
+            } else {
+              // Fill missing quarters with empty divs for 4-quarter display
+              while (quarters.length < 4) {
+                quarters.push({ minute: quarters.length * 15, value: null, timeStr: null });
+              }
+              
+              let cellHtml = '';
+              
+              quarters.forEach((quarter, index) => {
+                if (quarter.value !== null) {
+                  const value = Math.round(quarter.value * 100) / 100;
+                  const bgColor = getBgColor(value);
+                  
+                  let extraClass = '';
+                  let borderClass = '';
+                  
+                  // Check if this is the current time quarter
+                  if (isCurrentQuarter(hour, quarter.minute, isToday)) {
+                    extraClass = 'font-bold';
+                    borderClass = 'border-2 border-solid border-gray-800';
+                  }
+                  
+                  // Check if this quarter is in cheapest or most expensive
+                  if (cheapestTimes.has(quarter.timeStr)) {
+                    borderClass = 'border-2 border-dotted border-lime-400';
+                  } else if (expensiveTimes.has(quarter.timeStr)) {
+                    borderClass = 'border-2 border-dotted border-rose-400';
+                  }
+                  
+                  cellHtml += `<div class="${bgColor} ${extraClass} ${borderClass}">${value}</div>`;
+                } else {
+                  cellHtml += '<div>-</div>';
+                }
+              });
+              
+              td.innerHTML = cellHtml;
+            }
+            
+            td.className = cellClasses;
+          }
+        });
+    }
+
+    async function loadAllData() {
+      await createTableRows();
+      const today = new Date();
+      const tomorrow = new Date(today);
+      tomorrow.setDate(today.getDate() + 1);
+      const tomorrowString = formatDate(tomorrow);
+      
+      // Check if tomorrow's data is available
+      let tomorrowAvailable = false;
+      try {
+        const resp = await fetch('/price/day/' + tomorrowString + '?num_cheapest_hours=8');
+        const data = await resp.json();
+        if (!data.detail || data.detail !== "prices not found") {
+          tomorrowAvailable = true;
+        }
+      } catch (e) {}
+      
+      const historyDays = getHistoryDays();
+      
+      // Calculate total rows: history days + today + tomorrow (if available)
+      let rowCount = historyDays + 1; // history days + today
+      if (tomorrowAvailable) {
+        rowCount += 1; // + tomorrow
+      }
+      
+      for (let offset = 0; offset < rowCount; offset++) {
+        let date;
+        let isToday = false;
+        
+        if (tomorrowAvailable && offset === 0) {
+          // Tomorrow is first row if available
+          date = tomorrow;
+        } else if (tomorrowAvailable && offset === 1) {
+          // Today is second row if tomorrow is available
+          date = today;
+          isToday = true;
+        } else if (!tomorrowAvailable && offset === 0) {
+          // Today is first row if tomorrow is not available
+          date = today;
+          isToday = true;
+        } else {
+          // Historical days
+          date = new Date(today);
+          const daysBack = tomorrowAvailable ? offset - 1 : offset;
+          date.setDate(today.getDate() - daysBack);
+        }
+        
+        const dateString = formatDate(date);
+        loadData(dateString, isToday);
+      }
+      
+      // Update the chart after loading table data
+      await updateChart();
+    }
+
+    window.onload = function() {
+      loadAllData();
+      setInterval(loadAllData, 3600000);
+    };
+  </script>
+</head>
+<body class="bg-neutral-800">
+    <table class="table border-collapse border border-slate-500 text-center w-full" id="prices-table">
+        <thead>
+            <tr class="bg-neutral-400">
+                <th class="px-1">Datum</th>
+                <th class="px-1">00</th>
+                <th class="px-1">01</th>
+                <th class="px-1">02</th>
+                <th class="px-1">03</th>
+                <th class="px-1">04</th>
+                <th class="px-1">05</th>
+                <th class="px-1">06</th>
+                <th class="px-1">07</th>
+                <th class="px-1">08</th>
+                <th class="px-1">09</th>
+                <th class="px-1">10</th>
+                <th class="px-1">11</th>
+                <th class="px-1">12</th>
+                <th class="px-1">13</th>
+                <th class="px-1">14</th>
+                <th class="px-1">15</th>
+                <th class="px-1">16</th>
+                <th class="px-1">17</th>
+                <th class="px-1">18</th>
+                <th class="px-1">19</th>
+                <th class="px-1">20</th>
+                <th class="px-1">21</th>
+                <th class="px-1">22</th>
+                <th class="px-1">23</th>
+            </tr>
+        </thead>
+        <tbody id="prices-table-body">
+        </tbody>
+    </table>
+
+</body>
+</html>

@@ -1,0 +1,24 @@
+# https://taskfile.dev
+
+version: '3'
+
+vars:
+  IMAGE: gitea.ceperka.net/cx/pricepower
+  TAG: dev
+
+tasks:
+  dev :
+    cmds:
+    - fastapi dev calculator/main.py --reload
+
+  build:
+    cmds:
+    - docker build -t {{ .IMAGE }}:{{ .TAG }} .
+
+  tag-latest:
+    cmds:
+    - docker tag {{ .IMAGE }}:{{ .TAG }} {{ .IMAGE }}:latest
+
+  push:
+    cmds:
+    - docker push {{ .IMAGE }}:{{ .TAG }}

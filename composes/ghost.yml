@@ -1,0 +1,63 @@
+services:
+  mgm:
+    image: harbor.rosti.cz/rosti-public/mgm:latest
+    environment:
+      TTYD_TOKEN: ${TTYD_TOKEN}
+      SET_SHELL: fish
+    volumes:
+      - /srv/stack:/srv/stack
+      - /root/.docker/:/root/.docker/
+      - /run/docker.sock:/run/docker.sock
+      - /etc/shadow:/etc/shadow
+      - /root/.ssh:/root/.ssh
+      - /etc/ssh:/etc/ssh
+    ports:
+      - '1234:1234'
+      - '22:22'
+    profiles:
+      - mgm
+  traefik:
+    image: traefik:v3.4
+    restart: always
+    security_opt:
+      - no-new-privileges:true
+    command:
+      - '--providers.docker=true'
+      - '--providers.docker.exposedbydefault=false'
+      - '--entryPoints.web.address=:80'
+      - '--entryPoints.web.forwardedHeaders.trustedIPs=10.0.11.0/24'
+    ports:
+      - '80:80'
+    volumes:
+      - /run/docker.sock:/run/docker.sock:ro
+  ghost:
+    image: ghost:6-alpine
+    restart: always
+    environment:
+      database__client: mysql
+      database__connection__host: db
+      database__connection__user: root
+      database__connection__password: ${MYSQL_ROOT_PASSWORD}
+      database__connection__database: ghost
+      url: https://workshopghost-126.rostiapp.cz
+    volumes:
+      - ./data/ghost:/var/lib/ghost/content
+    labels:
+      - traefik.enable=true
+      - traefik.http.routers.welcome.rule=PathPrefix(`/`)
+      - traefik.http.routers.welcome.entrypoints=web
+  db:
+    image: mysql:8.0
+    restart: always
+    environment:
+      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD}
+    volumes:
+      - ./data/db:/var/lib/mysql
+  watchtower:
+    image: containrrr/watchtower:latest
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+      - /root/.docker/config.json:/root/.docker/config.json
+    command:
+      - '--interval'
+      - '3600'
