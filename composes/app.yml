@@ -19,7 +19,7 @@ services:
     image: harbor.rosti.cz/rosti-public/runtime:2025.09-1
     restart: always
     volumes:
-    - ./data:/srv/app
+    - ./data:/srv
     ports:
     - 22:22
     - 80:8000
