@@ -1,24 +1,94 @@
-name: Build a dev image
+name: Release of a new version
 
+# Tady se nastavuje kdy se má naše workflow spustit
 on:
+  # Reagovat na git push do větve "main"
   push:
     branches: [ main ]
-  workflow_dispatch: {}
+  # Manuální spuštění
+  workflow_dispatch:
+    inputs:
+      # Nastavíme jeden input, kterým můžeme workflow říct, o jakou jde verzi
+      version:
+        description: 'Version to release'
+        required: true
+        default: 'latest'
+        type: string
+  # Spustí toto workflow, když se na GitHubu přidá nový release
+  #release:
+  #  types: [published]
 
 jobs:
-  build:
+  # Job, který jsme nazvali deploy
+  deploy:
+    # Použijeme výchozí runner, který nám managuje GitHub
     runs-on: ubuntu-latest
+    # Nastavíme proměnné prostředí s názvem image
     env:
-      IMAGE: ghcr.io/rosti-cz/workshop-custom-app
-      TAG: dev
+      # Image včetně domény s registry sestavíme pomocí proměnné připravené GitHubem
+      IMAGE: ghcr.io/${{ github.repository }}
+      # !!! Tento secret je potřeba nastavit ručně v GitHub secrets pro tento konkrétní project
+      PULL_ENDPOINT: ${{ secrets.PULL_ENDPOINT }}
+    # Jednotlivé stepy našeho deploy jobu
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
 
+      # Otestujeme jestli je nastavený secret
+      - name: Test that PULL_ENDPOINT is set
+        run: test -n "$PULL_ENDPOINT" || { echo "Secret PULL_ENDPOINT is not set!"; exit 1; }
+
+      # Nastavíme image tag na main, pokud je zdrojem události git push
+      - name: Get image tag on push
+        if: github.event_name == 'push'
+        run: echo "TAG_NAME=${GITHUB_SHA:0:7}" >> $GITHUB_ENV
+      # Nastavíme image tag na git commit ID pokud je zdrojem události release
+      - name: Get image tag on release
+        if: github.event_name == 'release'
+        run: echo "TAG_NAME=${GITHUB_REF#refs/tags/}" >> $GITHUB_ENV
+      # Nastavíme image tag na zvolený string, pokud je zdrojem události manuální spuštění
+      - name: Get image tag on workflow_dispatch
+        if: github.event_name == 'workflow_dispatch'
+        run: echo "TAG_NAME=${{ github.event.inputs.version }}" >> $GITHUB_ENV
+
+      # Debug output, vytiskneme proměnné prostředí, které se hodí pro ladění tohoto workflow
+      - name: Debug info
+        run: |
+          echo "Username: ${{ github.actor }}"
+          echo "Image: $IMAGE"
+          echo "Image tag: ${{ env.TAG_NAME }}"
+
+      # Login do GitHub docker image registry, používá přístup vygenerovaný GitHubem pro workflows
       - name: Log in to registry
         run: echo "${{ secrets.GITHUB_TOKEN }}" | docker login ghcr.io -u ${{ github.actor }} --password-stdin
       
+      # Build image
       - name: Build
-        run: docker build -t $IMAGE:$TAG .
+        run: docker build -t $IMAGE:${{ env.TAG_NAME }} .
+
+      # Otagování nové image tagem latest
+      - name: Tag latest
+        run: docker tag $IMAGE:${{ env.TAG_NAME }} $IMAGE:latest
       
+      # Push nového image
       - name: Push
-        run: docker push $IMAGE:$TAG
+        run: docker push $IMAGE:${{ env.TAG_NAME }}
+      
+      # Push latest tagu
+      - name: Push latest
+        run: docker push $IMAGE:latest
+      
+      # Zavoláme administraci, aby si stáhla nový image
+      - name: Call pull+up endpoint
+        run: |
+          RESPONSE=$(curl -s $PULL_ENDPOINT)
+          STATUS=$(echo "$RESPONSE" | jq -r '.status')
+          if [ "$STATUS" = "0" ]; then
+            echo "Pull endpoint call successful"
+          else
+            echo "Error: Pull endpoint returned status $STATUS"
+            echo "--- STDOUT ---"
+            echo "$RESPONSE" | jq -r '.stdout'
+            echo "--- STDERR ---"
+            echo "$RESPONSE" | jq -r '.stderr'
+            exit 1
+          fi
