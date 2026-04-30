@@ -27,6 +27,10 @@ jobs:
   deploy:
     # Použijeme výchozí runner, který nám managuje GitHub
     runs-on: ubuntu-latest
+    # Upravíme práva přidělená pro vygenerovaný GitHub token
+    permissions:
+      contents: read
+      packages: write
     # Nastavíme proměnné prostředí s názvem image
     env:
       # Image včetně domény s registry sestavíme pomocí proměnné připravené GitHubem
